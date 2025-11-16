@@ -5,6 +5,7 @@ An intelligent personal assistant that integrates with Notion, iMessage, and Goo
 ## Features
 
 - **Notion Integration**: Read and update data from your Notion workspace
+- **TickTick Integration**: Task management with daily briefings, overdue tracking, and priority filtering
 - **iMessage Automation**: Monitor messages and send automated responses
 - **Google Calendar Sync**: Manage calendar events and reminders
 - **ADHD-Aware Support**: Time-blindness helpers, executive function support
@@ -55,14 +56,27 @@ personal_assistant/
    - Calendar databases
    - Task databases
 
-### 2. iMessage Access
+### 2. TickTick Setup (Optional but Recommended)
+
+1. Add your TickTick credentials to `.env`:
+   ```
+   TICKTICK_USERNAME=your_email@example.com
+   TICKTICK_PASSWORD=your_password
+   ```
+2. Install TickTick library:
+   ```bash
+   pip install ticktick-py
+   ```
+3. See [TICKTICK_SETUP.md](TICKTICK_SETUP.md) for detailed setup
+
+### 3. iMessage Access
 
 1. Grant Full Disk Access to Terminal:
    - System Preferences → Security & Privacy → Privacy → Full Disk Access
    - Add Terminal.app or your Python interpreter
 2. The Messages database is at `~/Library/Messages/chat.db`
 
-### 3. Google Calendar API
+### 4. Google Calendar API (Optional)
 
 1. Create a Google Cloud project
 2. Enable Google Calendar API
