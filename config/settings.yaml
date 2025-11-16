@@ -1,0 +1,94 @@
+# Personal Assistant Configuration
+
+# Notion settings
+notion:
+  token_env_var: "NOTION_TOKEN"
+  assistant_page_id: "29664f44-8283-8098-ab98-e34380b5d96b"
+  # Add other page/database IDs as you share them with the integration
+  referenced_pages:
+    meal_planning: "27f64f44-8283-8152-8a1a-ed26e775f5f3"
+    memories_main: "29464f44-8283-80c4-bf65-dcbfd7e90205"
+    personal_topics: "29564f44-8283-808f-8cc2-d0d864298d86"
+    work_topics: "29664f44-8283-80a5-b782-c2af62a7dbbb"
+    finance: "29564f44-8283-804f-a3a1-d5ae41013bb7"
+    ai_usage: "29564f44-8283-80d9-8d5c-ea630e2698a2"
+
+# iMessage settings
+imessage:
+  enabled: true
+  database_path: "~/Library/Messages/chat.db"
+  poll_interval_seconds: 30
+  monitor_group_chats: true
+  auto_respond: false  # Set to true to enable automated responses
+
+  # Keywords that trigger the assistant
+  activation_keywords:
+    - "Mode: Personal Assistant"
+    - "daily schedule"
+    - "weekly plan"
+    - "meal planning"
+    - "what's on my calendar"
+    - "help me organize"
+    - "weekend planning"
+    - "cycle phase check"
+
+# Google Calendar settings
+google_calendar:
+  enabled: true
+  credentials_file: "credentials.json"
+  token_file: "token.json"
+  calendar_id: "primary"  # Use 'primary' for main calendar
+  sync_interval_minutes: 15
+
+# Automation settings
+automation:
+  enabled: true
+
+  # Daily schedule
+  daily_briefing:
+    enabled: true
+    time: "07:00"  # 7 AM
+    timezone: "America/Los_Angeles"  # Adjust to your timezone
+
+  # Weekly planning
+  weekly_review:
+    enabled: true
+    day: "Sunday"
+    time: "18:00"  # 6 PM
+
+  # Meal planning
+  meal_planning:
+    enabled: true
+    day: "Sunday"
+    time: "10:00"  # 10 AM
+
+  # Playdate planning
+  playdate_reminder:
+    enabled: true
+    day: "Friday"
+    time: "14:00"  # 2 PM
+
+# ADHD support settings
+adhd_support:
+  time_blindness_helpers: true
+  advance_preparation_reminders: true
+
+  # Lead times for different event types
+  lead_times:
+    birthdays_days: 14
+    holidays_days: 21
+    travel_days: 30
+    school_events_days: 7
+    medical_appointments_days: 3
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/assistant.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# State management
+state:
+  file: "data/state.json"
+  auto_save: true
