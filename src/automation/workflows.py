@@ -7,6 +7,7 @@ from ..integrations.notion import NotionIntegration
 from ..integrations.google_calendar import GoogleCalendarIntegration
 from ..integrations.imessage import iMessageIntegration
 from ..integrations.ticktick import TickTickIntegration
+from ..integrations.ticktick_oauth import TickTickOAuth
 from ..utils.config import get_config
 from ..utils.logger import get_logger
 
@@ -25,13 +26,20 @@ class WorkflowEngine:
         self.imessage = None
         self.ticktick = None
 
-        # Initialize TickTick if enabled
+        # Initialize TickTick if enabled (try OAuth first, then password)
         if self.config.get('ticktick.enabled', False):
             try:
-                self.ticktick = TickTickIntegration()
+                # Try OAuth first (for passkey/social login users)
+                self.ticktick = TickTickOAuth()
                 if not self.ticktick.is_available():
-                    self.logger.warning("TickTick credentials not configured")
-                    self.ticktick = None
+                    self.logger.info("TickTick OAuth not available, trying password auth...")
+                    # Fall back to password authentication
+                    self.ticktick = TickTickIntegration()
+                    if not self.ticktick.is_available():
+                        self.logger.warning("TickTick credentials not configured")
+                        self.ticktick = None
+                else:
+                    self.logger.info("Using TickTick OAuth authentication")
             except Exception as e:
                 self.logger.warning(f"TickTick not available: {e}")
 
