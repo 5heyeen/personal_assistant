@@ -22,3 +22,6 @@ apscheduler>=3.10.4
 # Utilities
 python-dateutil>=2.8.2
 pytz>=2023.3
+
+# TickTick integration
+ticktick-py>=2.0.0

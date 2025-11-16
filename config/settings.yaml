@@ -32,6 +32,12 @@ imessage:
     - "weekend planning"
     - "cycle phase check"
 
+# TickTick settings
+ticktick:
+  enabled: true
+  username_env_var: "TICKTICK_USERNAME"
+  password_env_var: "TICKTICK_PASSWORD"
+
 # Google Calendar settings
 google_calendar:
   enabled: true

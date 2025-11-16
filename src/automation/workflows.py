@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from ..integrations.notion import NotionIntegration
 from ..integrations.google_calendar import GoogleCalendarIntegration
 from ..integrations.imessage import iMessageIntegration
+from ..integrations.ticktick import TickTickIntegration
 from ..utils.config import get_config
 from ..utils.logger import get_logger
 
@@ -22,6 +23,17 @@ class WorkflowEngine:
         self.notion = NotionIntegration()
         self.calendar = None
         self.imessage = None
+        self.ticktick = None
+
+        # Initialize TickTick if enabled
+        if self.config.get('ticktick.enabled', False):
+            try:
+                self.ticktick = TickTickIntegration()
+                if not self.ticktick.is_available():
+                    self.logger.warning("TickTick credentials not configured")
+                    self.ticktick = None
+            except Exception as e:
+                self.logger.warning(f"TickTick not available: {e}")
 
         # Initialize Google Calendar if enabled
         if self.config.google_calendar_enabled:
@@ -66,8 +78,35 @@ class WorkflowEngine:
                 self.logger.error(f"Error getting calendar events: {e}")
                 briefing_parts.append("\n⚠️ Could not retrieve calendar events")
 
-        # Add placeholders for future Notion integrations
-        briefing_parts.append("\n✅ Tasks: (Configure task database in Notion)")
+        # Get tasks from TickTick
+        if self.ticktick and self.ticktick.is_available():
+            try:
+                today_tasks = self.ticktick.get_today_tasks()
+                overdue_tasks = self.ticktick.get_overdue_tasks()
+                stats = self.ticktick.get_task_statistics()
+
+                briefing_parts.append("\n✅ Tasks:")
+                if overdue_tasks:
+                    briefing_parts.append(f"  ⚠️ {len(overdue_tasks)} overdue task(s)")
+                    for task in overdue_tasks[:3]:  # Show first 3
+                        briefing_parts.append(f"    - {self.ticktick.format_task_summary(task)}")
+
+                if today_tasks:
+                    briefing_parts.append(f"  📋 {len(today_tasks)} task(s) due today")
+                    for task in today_tasks[:5]:  # Show first 5
+                        briefing_parts.append(f"    - {self.ticktick.format_task_summary(task)}")
+                else:
+                    briefing_parts.append("  ✨ No tasks due today")
+
+                if stats.get('high_priority', 0) > 0:
+                    briefing_parts.append(f"  🔴 {stats['high_priority']} high priority task(s)")
+
+            except Exception as e:
+                self.logger.error(f"Error getting TickTick tasks: {e}")
+                briefing_parts.append("\n✅ Tasks: (Error loading from TickTick)")
+        else:
+            briefing_parts.append("\n✅ Tasks: (Configure TickTick credentials)")
+
         briefing_parts.append("\n🍽️ Meals: (Configure meal planning database)")
 
         briefing = "\n".join(briefing_parts)
