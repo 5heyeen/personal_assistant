@@ -213,30 +213,92 @@ class TickTickOAuth:
                 self.logger.error(f"API request failed: {e}")
             return None
 
+    def get_all_projects(self) -> List[Dict[str, Any]]:
+        """Get all projects.
+
+        Returns:
+            List of project dictionaries
+        """
+        result = self._api_request('GET', '/project')
+        return result if result else []
+
     def get_all_tasks(self) -> List[Dict[str, Any]]:
-        """Get all tasks.
+        """Get all tasks from all projects.
 
         Returns:
             List of task dictionaries
         """
-        result = self._api_request('GET', '/task')
-        return result if result else []
+        all_tasks = []
+
+        # Get all projects first
+        projects = self.get_all_projects()
+
+        # Get tasks from each project
+        for project in projects:
+            project_id = project.get('id')
+            if not project_id:
+                continue
+
+            # Skip closed projects
+            if project.get('closed', False):
+                continue
+
+            # Get project data (includes tasks)
+            project_data = self._api_request('GET', f'/project/{project_id}/data')
+            if project_data:
+                tasks = project_data.get('tasks', [])
+                all_tasks.extend(tasks)
+
+        return all_tasks
+
+    def _parse_ticktick_date(self, date_str: str) -> datetime:
+        """Parse TickTick date format.
+
+        Args:
+            date_str: Date string from TickTick API
+
+        Returns:
+            Parsed datetime object
+        """
+        # TickTick returns dates like: 2026-11-11T23:00:00.000+0000
+        # Python's fromisoformat needs: 2026-11-11T23:00:00.000+00:00
+        # Also handle 'Z' suffix
+        date_str = date_str.replace('Z', '+00:00')
+
+        # Fix timezone format: +0000 -> +00:00
+        if '+' in date_str and date_str[-5] in ['+', '-']:
+            # Has timezone without colon
+            date_str = date_str[:-2] + ':' + date_str[-2:]
+
+        return datetime.fromisoformat(date_str)
 
     def get_today_tasks(self) -> List[Dict[str, Any]]:
-        """Get tasks due today.
+        """Get tasks due today (in local timezone).
 
         Returns:
             List of task dictionaries
         """
         all_tasks = self.get_all_tasks()
-        today = datetime.now().date()
+        now = datetime.now()
+        today = now.date()
 
         today_tasks = []
         for task in all_tasks:
             due_date = task.get('dueDate')
             if due_date:
-                task_date = datetime.fromisoformat(due_date.replace('Z', '+00:00')).date()
-                if task_date == today and task.get('status') == 0:  # 0 = not completed
+                # Parse the due date (returns timezone-aware datetime)
+                task_datetime_utc = self._parse_ticktick_date(due_date)
+
+                # Convert to local timezone
+                # This ensures tasks scheduled for Saturday 00:00 local time
+                # don't show up in Friday's briefing
+                task_datetime_local = task_datetime_utc.astimezone()
+
+                # Get the local date
+                task_date_local = task_datetime_local.date()
+
+                # Only include if the task's local date is today and not completed
+                if task_date_local == today and task.get('status') == 0:
                     today_tasks.append(self._format_task(task))
 
         return today_tasks
@@ -254,7 +316,7 @@ class TickTickOAuth:
         for task in all_tasks:
             due_date = task.get('dueDate')
             if due_date:
-                task_date = datetime.fromisoformat(due_date.replace('Z', '+00:00')).date()
+                task_date = self._parse_ticktick_date(due_date).date()
                 if task_date < today and task.get('status') == 0:
                     overdue.append(self._format_task(task))
 
@@ -281,14 +343,14 @@ class TickTickOAuth:
             # Completed today
             completed_time = task.get('completedTime')
             if completed_time:
-                completed_date = datetime.fromisoformat(completed_time.replace('Z', '+00:00')).date()
+                completed_date = self._parse_ticktick_date(completed_time).date()
                 if completed_date == today:
                     stats['completed_today'] += 1
 
             # Due today and overdue
             due_date = task.get('dueDate')
             if due_date and task.get('status') == 0:
-                task_date = datetime.fromisoformat(due_date.replace('Z', '+00:00')).date()
+                task_date = self._parse_ticktick_date(due_date).date()
                 if task_date == today:
                     stats['due_today'] += 1
                 elif task_date < today:
@@ -318,7 +380,7 @@ class TickTickOAuth:
         }
 
         if task.get('dueDate'):
-            formatted['due_date'] = datetime.fromisoformat(task['dueDate'].replace('Z', '+00:00'))
+            formatted['due_date'] = self._parse_ticktick_date(task['dueDate'])
 
         if task.get('tags'):
             formatted['tags'] = task.get('tags', [])
@@ -358,3 +420,139 @@ class TickTickOAuth:
             parts.append(f"[{tags_str}]")
 
         return ' '.join(parts)
+
+    def create_task(
+        self,
+        title: str,
+        project_id: Optional[str] = None,
+        due_date: Optional[datetime] = None,
+        priority: int = 0,
+        tags: Optional[List[str]] = None,
+        content: Optional[str] = None,
+        repeat_rule: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Create a new task in TickTick.
+
+        Args:
+            title: Task title
+            project_id: Project/list ID (optional)
+            due_date: Due date/time (optional)
+            priority: Priority level (0=None, 1=Low, 3=Medium, 5=High)
+            tags: List of tags (optional)
+            content: Task description/notes (optional)
+            repeat_rule: Recurrence rule in RRULE format (optional)
+                        Example: "FREQ=DAILY;BYDAY=MO,TU,WE,TH,SA" for daily except Fri/Sun
+
+        Returns:
+            Created task data or None if failed
+        """
+        if not self.access_token:
+            self.logger.error("Not authenticated - run authorize() first")
+            return None
+
+        task_data = {
+            'title': title,
+            'priority': priority
+        }
+
+        if project_id:
+            task_data['projectId'] = project_id
+
+        if due_date:
+            # TickTick expects due date in ISO format with timezone (UTC)
+            # Format: "2025-11-25T23:00:00.000+0000"
+            if due_date.tzinfo is None:
+                # If no timezone, treat as UTC
+                from datetime import timezone
+                due_date = due_date.replace(tzinfo=timezone.utc)
+
+            # Format with milliseconds and timezone
+            task_data['dueDate'] = due_date.strftime('%Y-%m-%dT%H:%M:%S.000%z')
+
+        if tags:
+            task_data['tags'] = tags
+
+        if content:
+            task_data['content'] = content
+
+        if repeat_rule:
+            # TickTick uses 'repeat' field for recurrence rules
+            task_data['repeat'] = repeat_rule
+
+        result = self._api_request('POST', '/task', json=task_data)
+
+        if result:
+            self.logger.info(f"Created task: {title}")
+            return result
+        else:
+            self.logger.error(f"Failed to create task: {title}")
+            return None
+
+    def find_project_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Find a project/list by name.
+
+        Args:
+            name: Project name to search for
+
+        Returns:
+            Project data or None if not found
+        """
+        projects = self.get_all_projects()
+
+        for project in projects:
+            if project.get('name', '').lower() == name.lower():
+                return project
+
+        return None
+
+    def create_project(self, name: str, color: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Create a new project/list.
+
+        Args:
+            name: Project name
+            color: Project color (optional)
+
+        Returns:
+            Created project data or None if failed
+        """
+        if not self.access_token:
+            self.logger.error("Not authenticated - run authorize() first")
+            return None
+
+        project_data = {'name': name}
+
+        if color:
+            project_data['color'] = color
+
+        result = self._api_request('POST', '/project', json=project_data)
+
+        if result:
+            self.logger.info(f"Created project: {name}")
+            return result
+        else:
+            self.logger.error(f"Failed to create project: {name}")
+            return None
+
+    def task_exists(self, title: str, project_id: Optional[str] = None) -> bool:
+        """Check if a task with the given title already exists.
+
+        Args:
+            title: Task title to search for
+            project_id: Optional project ID to narrow search
+
+        Returns:
+            True if task exists, False otherwise
+        """
+        all_tasks = self.get_all_tasks()
+
+        for task in all_tasks:
+            # Check if titles match (case-insensitive)
+            if task.get('title', '').lower() == title.lower():
+                # If project_id specified, also check project match
+                if project_id:
+                    if task.get('projectId') == project_id:
+                        return True
+                else:
+                    return True
+
+        return False

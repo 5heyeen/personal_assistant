@@ -25,3 +25,11 @@ pytz>=2023.3
 
 # TickTick integration
 ticktick-py>=2.0.0
+
+# ICS Calendar integration
+icalendar>=5.0.0
+recurring-ical-events>=2.0.0
+
+# OCR for school plan scanning
+pytesseract>=0.3.0
+Pillow>=10.0.0

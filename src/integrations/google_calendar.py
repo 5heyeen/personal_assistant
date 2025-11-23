@@ -50,6 +50,14 @@ class GoogleCalendarIntegration:
         # Authenticate and build service
         self.service = self._build_service()
 
+    def is_available(self) -> bool:
+        """Check if Google Calendar integration is available.
+
+        Returns:
+            True if service is available, False otherwise
+        """
+        return self.service is not None
+
     def _build_service(self):
         """Build Google Calendar API service with authentication."""
         creds = None
@@ -98,7 +106,8 @@ class GoogleCalendarIntegration:
         time_max: Optional[datetime] = None,
         max_results: int = 100,
         single_events: bool = True,
-        order_by: str = 'startTime'
+        order_by: str = 'startTime',
+        calendar_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get calendar events within a time range.
 
@@ -108,6 +117,7 @@ class GoogleCalendarIntegration:
             max_results: Maximum number of events to return
             single_events: Expand recurring events
             order_by: How to order results ('startTime' or 'updated')
+            calendar_id: Calendar ID to query (defaults to self.calendar_id)
 
         Returns:
             List of event dictionaries
@@ -116,8 +126,10 @@ class GoogleCalendarIntegration:
             if time_min is None:
                 time_min = datetime.utcnow()
 
+            cal_id = calendar_id or self.calendar_id
+
             params = {
-                'calendarId': self.calendar_id,
+                'calendarId': cal_id,
                 'timeMin': time_min.isoformat() + 'Z',
                 'maxResults': max_results,
                 'singleEvents': single_events,
@@ -130,7 +142,7 @@ class GoogleCalendarIntegration:
             events_result = self.service.events().list(**params).execute()
             events = events_result.get('items', [])
 
-            self.logger.debug(f"Retrieved {len(events)} events")
+            self.logger.debug(f"Retrieved {len(events)} events from calendar {cal_id}")
             return events
 
         except HttpError as error:
@@ -165,9 +177,11 @@ class GoogleCalendarIntegration:
 
     def create_event(
         self,
-        summary: str,
-        start_time: datetime,
-        end_time: datetime,
+        event_data: Optional[Dict[str, Any]] = None,
+        calendar_id: Optional[str] = None,
+        summary: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         description: Optional[str] = None,
         location: Optional[str] = None,
         attendees: Optional[List[str]] = None,
@@ -175,7 +189,13 @@ class GoogleCalendarIntegration:
     ) -> Dict[str, Any]:
         """Create a new calendar event.
 
+        Can be called in two ways:
+        1. With event_data dictionary: create_event(event_data={'summary': '...', 'start': {...}}, calendar_id='...')
+        2. With individual parameters: create_event(summary='...', start_time=..., end_time=...)
+
         Args:
+            event_data: Complete event dictionary (takes precedence)
+            calendar_id: Calendar ID to use (defaults to self.calendar_id)
             summary: Event title
             start_time: Event start time
             end_time: Event end time
@@ -188,44 +208,55 @@ class GoogleCalendarIntegration:
             Created event data
         """
         try:
-            event = {
-                'summary': summary,
-                'start': {
-                    'dateTime': start_time.isoformat(),
-                    'timeZone': 'UTC'
-                },
-                'end': {
-                    'dateTime': end_time.isoformat(),
-                    'timeZone': 'UTC'
-                }
-            }
+            cal_id = calendar_id or self.calendar_id
 
-            if description:
-                event['description'] = description
-
-            if location:
-                event['location'] = location
-
-            if attendees:
-                event['attendees'] = [{'email': email} for email in attendees]
-
-            if reminders:
-                event['reminders'] = reminders
+            # If event_data provided, use it directly
+            if event_data:
+                event = event_data.copy()
             else:
-                # Default reminders
-                event['reminders'] = {
-                    'useDefault': False,
-                    'overrides': [
-                        {'method': 'popup', 'minutes': 30}
-                    ]
+                # Build event from individual parameters
+                if not summary or not start_time or not end_time:
+                    raise ValueError("Must provide either event_data or summary, start_time, and end_time")
+
+                event = {
+                    'summary': summary,
+                    'start': {
+                        'dateTime': start_time.isoformat(),
+                        'timeZone': 'UTC'
+                    },
+                    'end': {
+                        'dateTime': end_time.isoformat(),
+                        'timeZone': 'UTC'
+                    }
                 }
+
+                if description:
+                    event['description'] = description
+
+                if location:
+                    event['location'] = location
+
+                if attendees:
+                    event['attendees'] = [{'email': email} for email in attendees]
+
+                if reminders:
+                    event['reminders'] = reminders
+                else:
+                    # Default reminders
+                    event['reminders'] = {
+                        'useDefault': False,
+                        'overrides': [
+                            {'method': 'popup', 'minutes': 30}
+                        ]
+                    }
 
             created_event = self.service.events().insert(
-                calendarId=self.calendar_id,
+                calendarId=cal_id,
                 body=event
             ).execute()
 
-            self.logger.info(f"Created event: {summary} at {start_time}")
+            event_summary = event.get('summary', 'Untitled')
+            self.logger.info(f"Created event: {event_summary} in calendar {cal_id}")
             return created_event
 
         except HttpError as error:

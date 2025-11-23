@@ -1,5 +1,6 @@
 """iMessage integration for personal assistant."""
 
+import os
 import sqlite3
 import subprocess
 from typing import List, Dict, Optional, Tuple
@@ -18,13 +19,22 @@ class iMessageIntegration:
         self.config = get_config()
         self.logger = get_logger(__name__)
         self.db_path = self.config.imessage_database_path
+        self._available = self.db_path.exists()
 
-        # Validate database exists
-        if not self.db_path.exists():
-            raise FileNotFoundError(
+        # Log warning if not available
+        if not self._available:
+            self.logger.warning(
                 f"iMessage database not found at {self.db_path}. "
                 "Ensure Full Disk Access is granted to Terminal."
             )
+
+    def is_available(self) -> bool:
+        """Check if iMessage integration is available.
+
+        Returns:
+            True if database is accessible, False otherwise
+        """
+        return self._available
 
     def _connect_db(self) -> sqlite3.Connection:
         """Connect to iMessage database (read-only).
@@ -199,8 +209,13 @@ class iMessageIntegration:
             True if successful, False otherwise
         """
         try:
-            # Escape quotes in message
-            message = message.replace('"', '\\"').replace("'", "\\'")
+            # Escape special characters for AppleScript
+            # Replace backslash first, then quotes
+            message = message.replace('\\', '\\\\')
+            message = message.replace('"', '\\"')
+            message = message.replace('\n', '\\n')
+            message = message.replace('\r', '\\r')
+            message = message.replace('\t', '\\t')
 
             # AppleScript to send message
             script = f'''
@@ -382,4 +397,89 @@ class iMessageIntegration:
 
         except Exception as e:
             self.logger.error(f"Error searching messages: {e}")
+            raise
+
+    def get_message_attachments(
+        self,
+        sender: Optional[str] = None,
+        since: Optional[datetime] = None,
+        limit: int = 50
+    ) -> List[Dict]:
+        """Get messages with attachments.
+
+        Args:
+            sender: Filter by sender (phone/email)
+            since: Only get messages after this datetime
+            limit: Maximum number of messages
+
+        Returns:
+            List of message dictionaries with attachment paths
+        """
+        try:
+            conn = self._connect_db()
+            cursor = conn.cursor()
+
+            query = """
+                SELECT
+                    message.ROWID as id,
+                    message.text,
+                    message.date,
+                    handle.id as sender,
+                    attachment.filename,
+                    attachment.mime_type,
+                    attachment.transfer_name
+                FROM message
+                JOIN message_attachment_join ON message.ROWID = message_attachment_join.message_id
+                JOIN attachment ON message_attachment_join.attachment_id = attachment.ROWID
+                LEFT JOIN handle ON message.handle_id = handle.ROWID
+                WHERE attachment.filename IS NOT NULL
+            """
+
+            params = []
+
+            if sender:
+                query += " AND handle.id LIKE ?"
+                params.append(f'%{sender}%')
+
+            if since:
+                # Convert to Apple's timestamp
+                apple_epoch = datetime(2001, 1, 1)
+                timestamp = int((since - apple_epoch).total_seconds())
+                query += " AND message.date > ?"
+                params.append(timestamp)
+
+            query += " ORDER BY message.date DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            messages = []
+            for row in rows:
+                # Convert Apple timestamp
+                apple_epoch = datetime(2001, 1, 1)
+                date = apple_epoch + timedelta(seconds=row['date'] / 1_000_000_000)
+
+                # Get attachment path
+                filename = row['filename']
+                if filename and filename.startswith('~'):
+                    # Expand home directory
+                    filename = os.path.expanduser(filename)
+
+                messages.append({
+                    'id': row['id'],
+                    'text': row['text'],
+                    'sender': row['sender'],
+                    'date': date,
+                    'attachment_path': filename,
+                    'mime_type': row['mime_type'],
+                    'transfer_name': row['transfer_name']
+                })
+
+            conn.close()
+            self.logger.debug(f"Retrieved {len(messages)} messages with attachments")
+            return messages
+
+        except Exception as e:
+            self.logger.error(f"Error retrieving attachments: {e}")
             raise
